@@ -32,7 +32,7 @@ permissions:
   contents: write
 
 env:
-  MANIFEST_URL: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
+  MANIFEST_URL: https://github.com/SenseiDEV-Linux/platform_manifest_twrp_aosp.git
   MANIFEST_BRANCH: twrp-11
   DEVICE_NAME: apollo            # lunch twrp_apollo-eng  (PRODUCT_NAME := twrp_apollo)
 
@@ -66,16 +66,12 @@ jobs:
           sudo ln -sf "$HOME/bin/repo" /usr/local/bin/repo
           df -h
 
-      - name: Initialize source (AOSP twrp-11 + twrp-extras.xml как local manifest)
+      - name: Initialize source (AOSP twrp-11)
         run: |
           mkdir -p twrp && cd twrp
           git config --global user.name  "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
           repo init --depth=1 -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH"
-          # ★ Ключевой шаг для Android 11: подключаем форки TeamWin локальным манифестом
-          mkdir -p .repo/local_manifests
-          cp .repo/manifests/twrp-extras.xml .repo/local_manifests/twrp-extras.xml
-          cat .repo/local_manifests/twrp-extras.xml
 
       - name: Sync sources
         run: |
