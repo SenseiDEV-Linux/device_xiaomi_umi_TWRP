@@ -66,13 +66,15 @@ jobs:
           sudo ln -sf "$HOME/bin/repo" /usr/local/bin/repo
           df -h
 
-      - name: Initialize source (AOSP twrp-11)
+     - name: Initialize source (AOSP twrp-11, манифест самодостаточен)
         run: |
           mkdir -p twrp && cd twrp
           git config --global user.name  "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
           repo init --depth=1 -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH"
-
+          # Быстрая проверка, что слитый манифест валиден (иначе sync упадёт)
+          repo manifest > /dev/null && echo "Manifest OK"
+          
       - name: Sync sources
         run: |
           cd twrp
