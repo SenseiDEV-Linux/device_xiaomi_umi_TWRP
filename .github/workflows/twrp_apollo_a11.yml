@@ -1,0 +1,116 @@
+name: Build TWRP (apollo / Mi 10T · Android 11)
+
+# Сборка TWRP recovery для Xiaomi Mi 10T / 10T Pro / Redmi K30S Ultra (apollo)
+# Ветка манифеста: twrp-11 (minimal-manifest-twrp/platform_manifest_twrp_aosp)
+#
+# Важно: в ветке twrp-11 файл twrp-extras.xml НЕ подключён автоматически
+# (в отличие от twrp-12.1, где default.xml подключает twrp-default.xml).
+# Поэтому перед repo sync кладём twrp-extras.xml в .repo/local_manifests/ —
+# иначе после remove.xml исходников recovery не останется и сборка упадёт.
+
+on:
+  workflow_dispatch:
+    inputs:
+      DEVICE_TREE_URL:
+        description: 'Device tree URL (по умолчанию общий sm8250-tree с twrp_apollo.mk)'
+        required: true
+        default: 'https://github.com/SenseiDEV-Linux/device_xiaomi_umi_TWRP'
+      DEVICE_TREE_BRANCH:
+        description: 'Device tree branch'
+        required: true
+        default: 'android-11'
+      DEVICE_PATH:
+        description: 'Куда клонировать дерево (twrp_apollo.mk из дефолтного дерева требует device/xiaomi/umi)'
+        required: true
+        default: 'device/xiaomi/apollo'
+      OUT_PRODUCT_DIR:
+        description: 'Каталог результата out/target/product/<этот_каталог> (в дефолтном дереве PRODUCT_DEVICE=umi)'
+        required: true
+        default: 'apollo'
+
+permissions:
+  contents: write
+
+env:
+  MANIFEST_URL: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
+  MANIFEST_BRANCH: twrp-11
+  DEVICE_NAME: apollo            # lunch twrp_apollo-eng  (PRODUCT_NAME := twrp_apollo)
+
+jobs:
+  build:
+    name: twrp_apollo-eng -> recovery.img
+    runs-on: ubuntu-22.04          # ubuntu-20.04, на котором были заточены старые воркфлоу, из реестра GitHub убран
+    timeout-minutes: 330
+    steps:
+      - name: Free disk space (AOSP тяжёлый, место на раннере кончается)
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Extra swap (линковка требует больше 16 ГБ RAM)
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 24
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git-core bc bison build-essential curl flex gperf zip unzip \
+            libc6-dev libncurses5-dev libssl-dev libtinfo5 \
+            gcc-multilib g++-multilib lib32ncurses5-dev lib32z-dev \
+            libx11-dev libgl1-mesa-dev xsltproc libxml2-utils \
+            ccache schedtool squashfs-tools imagemagick libbz2-dev \
+            python3 python3-pip rsync lzop liblz4-tool
+          mkdir -p "$HOME/bin"
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo > "$HOME/bin/repo"
+          chmod a+x "$HOME/bin/repo"
+          sudo ln -sf "$HOME/bin/repo" /usr/local/bin/repo
+          df -h
+
+      - name: Initialize source (AOSP twrp-11 + twrp-extras.xml как local manifest)
+        run: |
+          mkdir -p twrp && cd twrp
+          git config --global user.name  "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          repo init --depth=1 -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH"
+          # ★ Ключевой шаг для Android 11: подключаем форки TeamWin локальным манифестом
+          mkdir -p .repo/local_manifests
+          cp .repo/manifests/twrp-extras.xml .repo/local_manifests/twrp-extras.xml
+          cat .repo/local_manifests/twrp-extras.xml
+
+      - name: Sync sources
+        run: |
+          cd twrp
+          repo sync -c -j"$(nproc)" --force-sync --no-tags
+          df -h
+
+      - name: Clone device tree
+        run: |
+          cd twrp
+          git clone --depth=1 "${{ inputs.DEVICE_TREE_URL }}" \
+            -b "${{ inputs.DEVICE_TREE_BRANCH }}" "${{ inputs.DEVICE_PATH }}"
+          git -C "${{ inputs.DEVICE_PATH }}" log --oneline -1
+
+      - name: Build recovery.img
+        run: |
+          cd twrp
+          export ALLOW_MISSING_DEPENDENCIES=true
+          source build/envsetup.sh
+          lunch "twrp_${DEVICE_NAME}-eng"
+          mka recoveryimage
+          ls -lh "out/target/product/${{ inputs.OUT_PRODUCT_DIR }}/recovery.img"
+
+      - name: Upload recovery.img to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: twrp/out/target/product/${{ inputs.OUT_PRODUCT_DIR }}/recovery.img
+          name: TWRP A11 for apollo (${{ github.run_id }})
+          tag_name: twrp-apollo-a11-${{ github.run_id }}
+          body: |
+            Unofficial TWRP for Xiaomi Mi 10T / 10T Pro / Redmi K30S Ultra (apollo)
+
+            - Manifest: minimal-manifest-twrp/platform_manifest_twrp_aosp @ twrp-11 (android-11.0.0_r29)
+            - TeamWin forks: twrp-extras.xml (local manifest)
+            - Device tree: ${{ inputs.DEVICE_TREE_URL }} @ ${{ inputs.DEVICE_TREE_BRANCH }}
+            - Target: recovery partition (не A/B, не vendor_boot)
+
+            Проверяйте через `fastboot boot recovery.img` перед прошивкой в recovery!
